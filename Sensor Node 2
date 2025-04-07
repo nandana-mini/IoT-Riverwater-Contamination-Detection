@@ -1,0 +1,74 @@
+#include "painlessMesh.h"
+
+#define MESH_PREFIX     "ESP32-Mesh"
+#define MESH_PASSWORD   "password123"
+#define MESH_PORT       5555
+
+Scheduler userScheduler;
+painlessMesh mesh;
+
+#define PH_PIN  34  // pH sensor connected to pin 34
+#define TDS_PIN 35  // TDS sensor connected to pin 35
+#define VREF 3.3    // ESP32 ADC reference voltage
+#define ADC_RES 4096  // ESP32 ADC resolution (12-bit)
+
+
+int location = 2;  // Location ID for Node 2
+
+// Function to read pH sensor value
+float readPH() {
+    int sensorValue = analogRead(PH_PIN);
+    float voltage = sensorValue * (VREF / ADC_RES);
+    float pHValue = 7.0 + ((voltage - 1.5) * 3.5);  // Example calibration formula
+    return pHValue;
+
+}
+
+// Function to read TDS sensor value
+float readTDS() {
+    int sensorValue = analogRead(TDS_PIN);
+    float voltage = sensorValue * (VREF / ADC_RES);
+    float tdsValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * 0.5;  // Example calibration
+    return tdsValue;
+
+}
+
+// Function to send Node 2's own sensor data
+void sendOwnMessage() {
+    float ph = readPH();
+    float tds = readTDS();
+    uint32_t timestamp = mesh.getNodeTime() / 1000;
+    String ownMsg = "l=" + String(location) + "&p=" + String(ph) + "&t=" + String(tds) + "&time=" + String(timestamp) + "s";
+    
+    mesh.sendBroadcast(ownMsg);
+    Serial.println("Sent Own: " + ownMsg);
+}
+
+// Task for sending data periodically
+Task taskSendOwnMessage(2000, TASK_FOREVER, &sendOwnMessage);
+
+// Callback function to receive messages and forward them
+void receivedCallback(uint32_t from, String &msg) {
+    Serial.printf("Received from %u: %s\n", from, msg.c_str());
+
+    // Forward message to Node 3
+    mesh.sendBroadcast(msg);
+    Serial.println("Forwarded: " + msg);
+}
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(PH_PIN, INPUT);
+    pinMode(TDS_PIN, INPUT);
+
+    mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT);
+    mesh.onReceive(&receivedCallback);
+    
+    // Add task to scheduler
+    userScheduler.addTask(taskSendOwnMessage);
+    taskSendOwnMessage.enable();
+}
+
+void loop() {
+    mesh.update();
+}
