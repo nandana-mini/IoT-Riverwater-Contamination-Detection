@@ -1,0 +1,61 @@
+#include "painlessMesh.h"
+
+#define MESH_PREFIX     "ESP32-Mesh"
+#define MESH_PASSWORD   "password123"
+#define MESH_PORT       5555
+
+#define PH_PIN 34   // Analog pin for pH sensor
+#define TDS_PIN 35  // Analog pin for TDS sensor
+#define VREF 3.3    // ESP32 ADC reference voltage 
+#define ADC_RES 4096  // ESP32 ADC resolution (12-bit)
+
+Scheduler userScheduler;
+painlessMesh mesh;
+
+int location = 1;  // Node Location Identifier
+
+// Function to read pH sensor value
+float readPH() {
+    int sensorValue = analogRead(PH_PIN);
+    float voltage = sensorValue * (VREF / ADC_RES);
+    float pHValue = 7.0 + ((voltage - 1.5) * 3.5);  //  calibration formula
+    return pHValue;
+}
+
+// Function to read TDS sensor value
+float readTDS() {
+    int sensorValue = analogRead(TDS_PIN);
+    float voltage = sensorValue * (VREF / ADC_RES);
+    float tdsValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * 0.5;  // calibration
+    return tdsValue;
+}
+
+// Function to send sensor data
+void sendMessage() {
+    float pH = readPH();
+    float TDS = readTDS();
+    uint32_t timestamp = mesh.getNodeTime() / 1000;
+
+    String msg = "l=" + String(location) + "&p=" + String(pH, 2) + "&t=" + String(TDS, 2) + "&time=" + String(timestamp) + "s";
+    mesh.sendBroadcast(msg);
+    Serial.println("Sent: " + msg);
+}
+
+// Define the task to send data every 2 seconds
+Task taskSendMessage(2000, TASK_FOREVER, &sendMessage);
+
+void setup() {
+    Serial.begin(115200);
+    mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT);
+    
+    pinMode(PH_PIN, INPUT);
+    pinMode(TDS_PIN, INPUT);
+
+    // Add task to scheduler
+    userScheduler.addTask(taskSendMessage);
+    taskSendMessage.enable();  // Enable the task
+}
+
+void loop() {
+    mesh.update();
+}
